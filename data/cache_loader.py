@@ -34,6 +34,7 @@ class VideoQAExample:
     duration: float         # seconds (0.0 if unknown)
     question_category: str
     frames: np.ndarray      # uint8 (N, H, W, 3)
+    subtitle_text: Optional[str] = None  # None if dataset has no subtitles
 
 
 class VideoQACache:
@@ -105,6 +106,7 @@ class VideoQACache:
         return new
 
     def __iter__(self) -> Iterator[VideoQAExample]:
+        has_subs_col = "subtitle_text" in self.df.columns
         for _, row in self.df.iterrows():
             frames = np.load(self.frames_root / f"{row['video_id']}.npy")
             options = [
@@ -112,6 +114,12 @@ class VideoQACache:
                 for i in range(5)
                 if pd.notna(row.get(f"option{i}"))
             ]
+            # Subtitles are optional — older caches don't have this column.
+            subtitle_text = None
+            if has_subs_col:
+                v = row["subtitle_text"]
+                if pd.notna(v) and isinstance(v, str) and v.strip():
+                    subtitle_text = v
             yield VideoQAExample(
                 video_id=row["video_id"],
                 question=row["question"],
@@ -120,4 +128,5 @@ class VideoQACache:
                 duration=float(row.get("duration", 0.0)),
                 question_category=str(row.get("question_category", "unknown")),
                 frames=frames,
+                subtitle_text=subtitle_text,
             )

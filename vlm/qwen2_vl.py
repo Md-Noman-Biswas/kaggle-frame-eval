@@ -35,7 +35,17 @@ class Qwen2VLJudge:
         device: Optional[str] = None,
         dtype: Optional[object] = None,
         max_new_tokens: int = 8,
+        use_subtitles: bool = False,
+        max_subtitle_chars: int = 4000,
     ):
+        """
+        Args:
+            use_subtitles: If True, inject subtitle text from the example into
+                the prompt before the question. Has no effect on examples
+                whose subtitle_text is None (e.g. EgoSchema, LVB).
+            max_subtitle_chars: Truncate subtitle text to this many chars to
+                control prompt length. Set higher for premium VLMs.
+        """
         import torch
         from transformers import Qwen2VLForConditionalGeneration, AutoProcessor
 
@@ -43,6 +53,8 @@ class Qwen2VLJudge:
         self._Image = __import__("PIL.Image", fromlist=["Image"])
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
         self.max_new_tokens = max_new_tokens
+        self.use_subtitles = use_subtitles
+        self.max_subtitle_chars = max_subtitle_chars
 
         self.processor = AutoProcessor.from_pretrained(model_id)
         load_dtype = (dtype if dtype is not None else torch.float16) \
@@ -53,8 +65,21 @@ class Qwen2VLJudge:
             device_map="auto" if self.device == "cuda" else None,
         ).eval()
 
-    def _build_prompt(self, question: str, options: List[str]) -> str:
-        lines = [f"Question: {question}", "Options:"]
+    def _build_prompt(
+        self,
+        question: str,
+        options: List[str],
+        subtitle_text: Optional[str] = None,
+    ) -> str:
+        lines = []
+        if self.use_subtitles and subtitle_text:
+            # Truncate to keep prompt manageable
+            subs = subtitle_text[: self.max_subtitle_chars]
+            lines.append("Subtitles:")
+            lines.append(subs)
+            lines.append("")
+        lines.append(f"Question: {question}")
+        lines.append("Options:")
         for letter, opt in zip(LETTERS, options):
             lines.append(f"{letter}. {opt}")
         lines.append("Answer with the single letter of the correct option only.")
@@ -75,6 +100,7 @@ class Qwen2VLJudge:
         frames: np.ndarray,
         question: str,
         options: List[str],
+        subtitle_text: Optional[str] = None,
     ) -> int:
         """
         Run the VLM on selected frames and return the predicted option index.
@@ -83,6 +109,8 @@ class Qwen2VLJudge:
             frames: uint8 array (K, H, W, 3) of the selected frames.
             question: question text.
             options: list of option strings (length 2-5).
+            subtitle_text: Optional subtitle text. Only used if
+                use_subtitles=True was passed to the constructor.
 
         Returns:
             Integer index into `options` of the predicted answer.
@@ -90,7 +118,7 @@ class Qwen2VLJudge:
         torch = self._torch
         Image = self._Image
         with torch.no_grad():
-            prompt_text = self._build_prompt(question, options)
+            prompt_text = self._build_prompt(question, options, subtitle_text)
 
             content = [
                 {"type": "image", "image": Image.fromarray(f)} for f in frames

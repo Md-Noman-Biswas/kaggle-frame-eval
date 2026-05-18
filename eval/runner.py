@@ -67,7 +67,12 @@ def run_evaluation(
 
         # ---- VLM ----
         t1 = time.perf_counter()
-        pred_idx = judge.answer(selected, ex.question, ex.options)
+        pred_idx = judge.answer(
+            selected,
+            ex.question,
+            ex.options,
+            subtitle_text=ex.subtitle_text,
+        )
         vlm_time = time.perf_counter() - t1
 
         rows.append({
