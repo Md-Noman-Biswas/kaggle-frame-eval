@@ -21,7 +21,7 @@ import pandas as pd
 from tqdm.auto import tqdm
 
 from frame_selectors import FrameSelector, validate_selection
-from vlm import Qwen2VLJudge
+from vlm import VLMJudge
 from data import VideoQACache
 from .metrics import compute_metrics, format_metrics
 
@@ -29,7 +29,7 @@ from .metrics import compute_metrics, format_metrics
 def run_evaluation(
     dataset: VideoQACache,
     selector: FrameSelector,
-    judge: Qwen2VLJudge,
+    judge: VLMJudge,
     k: int,
     output_dir: str,
     run_name: str,
@@ -41,7 +41,7 @@ def run_evaluation(
     Args:
         dataset: LVBCache (possibly subsetted).
         selector: a FrameSelector instance.
-        judge: a Qwen2VLJudge instance.
+        judge: a VLMJudge instance (Qwen2VLJudge, LLaVAOneVisionJudge, ...).
         k: number of frames the selector should pick.
         output_dir: where to write per_example.csv and summary.json.
         run_name: short identifier for this run (used in filenames).

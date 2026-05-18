@@ -1,10 +1,16 @@
 """
-Qwen2-VL judge — supports 2B (fp16) and 7B (4-bit).
+LLaVA-OneVision-7B judge.
 
-The Qwen2-VL family uses native multi-image input and a chat template.
-Setting model_id picks the size:
-  - "Qwen/Qwen2-VL-2B-Instruct"  → fits T4 in fp16 (~4 GB)
-  - "Qwen/Qwen2-VL-7B-Instruct"  → fits T4 in 4-bit (~5 GB)
+This is the primary baseline used in MDP^3 Table 1. Reproducing this model's
+numbers gives you the strongest published comparison point.
+
+Distributed weights expect 4-bit quantization to fit on a T4 (16 GB).
+
+Architecture notes:
+- Uses LlavaOnevisionForConditionalGeneration
+- Multi-image native (each frame is a separate image in the conversation)
+- Uses its own chat template via apply_chat_template
+- Greedy decoding for reproducibility
 """
 
 from typing import List, Optional
@@ -13,32 +19,34 @@ import numpy as np
 from .base import VLMJudge, parse_letter, build_prompt
 
 
-class Qwen2VLJudge(VLMJudge):
-    """Qwen2-VL family of judges, 2B or 7B."""
+class LLaVAOneVisionJudge(VLMJudge):
+    """LLaVA-OneVision-7B (or 0.5B for smoke tests)."""
 
-    name = "qwen2_vl"
+    name = "llava_onevision"
 
     def __init__(
         self,
-        model_id: str = "Qwen/Qwen2-VL-2B-Instruct",
+        model_id: str = "llava-hf/llava-onevision-qwen2-7b-ov-hf",
         device: Optional[str] = None,
         dtype: Optional[object] = None,
         max_new_tokens: int = 8,
         use_subtitles: bool = False,
         max_subtitle_chars: int = 4000,
-        load_4bit: bool = False,
+        load_4bit: bool = True,
     ):
         """
         Args:
-            model_id: HuggingFace model id. "Qwen/Qwen2-VL-2B-Instruct" or
-                "Qwen/Qwen2-VL-7B-Instruct".
-            load_4bit: If True, load with bitsandbytes 4-bit quantization.
-                Required for 7B on T4. Ignored for CPU.
-            use_subtitles: Inject subtitle text into the prompt.
-            max_subtitle_chars: Truncate subtitle text to this many chars.
+            model_id: HuggingFace model id. Recommended values:
+              - "llava-hf/llava-onevision-qwen2-7b-ov-hf"      (primary, ~5 GB in 4-bit)
+              - "llava-hf/llava-onevision-qwen2-0.5b-ov-hf"    (smoke tests)
+            load_4bit: Default True. 7B does NOT fit on T4 in fp16.
+                Set False only on CPU or for 0.5B variant.
         """
         import torch
-        from transformers import Qwen2VLForConditionalGeneration, AutoProcessor
+        from transformers import (
+            LlavaOnevisionForConditionalGeneration,
+            AutoProcessor,
+        )
 
         self._torch = torch
         self._Image = __import__("PIL.Image", fromlist=["Image"])
@@ -66,7 +74,7 @@ class Qwen2VLJudge(VLMJudge):
             load_kwargs["torch_dtype"] = load_dtype
             load_kwargs["device_map"] = "auto" if self.device == "cuda" else None
 
-        self.model = Qwen2VLForConditionalGeneration.from_pretrained(
+        self.model = LlavaOnevisionForConditionalGeneration.from_pretrained(
             model_id, **load_kwargs
         ).eval()
 
@@ -85,19 +93,18 @@ class Qwen2VLJudge(VLMJudge):
                 self.use_subtitles, self.max_subtitle_chars,
             )
 
-            content = [{"type": "image", "image": Image.fromarray(f)} for f in frames]
+            # LLaVA-OneVision chat: each frame is a separate image entry.
+            content = [{"type": "image"} for _ in frames]
             content.append({"type": "text", "text": prompt_text})
             messages = [{"role": "user", "content": content}]
 
             text = self.processor.apply_chat_template(
-                messages, tokenize=False, add_generation_prompt=True
+                messages, add_generation_prompt=True
             )
             image_inputs = [Image.fromarray(f) for f in frames]
             inputs = self.processor(
-                text=[text],
+                text=text,
                 images=image_inputs,
-                videos=None,
-                padding=True,
                 return_tensors="pt",
             ).to(self.device)
 
